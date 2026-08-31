@@ -582,6 +582,157 @@ def click_button_clear_door_fault():
 # --- end door motion timeout fault ---------------------------------------
 
 
+# --- Operator dead-man's-switch ------------------------------------------
+# Deliberately non-modal (plain Toplevel, no grab_set()) -- Emergency Stop
+# and Close Doors must stay clickable the whole time this alert is up.
+# Auto-close reuses button_close_door.invoke(), the same pattern the
+# existing weather auto-close already uses, so it inherits every existing
+# guard (door fault, motion-in-progress, etc.) and logs through the normal
+# close_door_command path for free.
+
+def _on_deadman_activity(event=None):
+    global _deadman_last_activity_time
+    _deadman_last_activity_time = time.monotonic()
+    if _deadman_warning_active:
+        _deadman_acknowledge()
+
+
+def _deadman_acknowledge():
+    global _deadman_warning_active, _deadman_last_activity_time, _deadman_alert_window
+    if not _deadman_warning_active:
+        return
+    idle_s = None
+    if _deadman_warning_started_at is not None:
+        idle_s = round(time.monotonic() - _deadman_warning_started_at, 1)
+    log_event('door', 'deadman_switch_acknowledged', idle_s_at_ack=idle_s)
+    _deadman_last_activity_time = time.monotonic()
+    _deadman_warning_active = False
+    if _deadman_alert_window is not None:
+        try:
+            _deadman_alert_window.destroy()
+        except Exception:
+            pass
+        _deadman_alert_window = None
+    gui.attributes('-topmost', False)
+    listbox.insert(END, ' Dead-man\'s-switch alert acknowledged.')
+
+
+def _deadman_force_foreground():
+    gui.deiconify()
+    gui.lift()
+    gui.attributes('-topmost', True)
+    gui.focus_force()
+    gui.bell()
+
+
+def _raise_deadman_warning():
+    global _deadman_warning_active, _deadman_warning_started_at, _deadman_alert_window, _deadman_last_bell_time
+
+    idle_s = round(time.monotonic() - _deadman_last_activity_time, 1)
+    _deadman_warning_active = True
+    _deadman_warning_started_at = time.monotonic()
+    _deadman_last_bell_time = time.monotonic()
+
+    log_event('door', 'deadman_switch_warning_issued', idle_s=idle_s,
+              threshold_s=DEADMAN_WARNING_IDLE_SECONDS)
+    listbox.insert(END, ' =========== DEAD-MAN\'S-SWITCH WARNING ===========')
+    listbox.insert(END, ' No activity detected for over ' +
+                   str(DEADMAN_WARNING_IDLE_SECONDS // 60) + ' minutes while the doors are open.')
+    listbox.insert(END, ' Doors will close automatically in ' +
+                   str(DEADMAN_GRACE_SECONDS // 60) + ' minutes unless acknowledged.')
+
+    _deadman_force_foreground()
+
+    win = Toplevel(gui)
+    win.title('Are you there?')
+    win.geometry('460x220+420+250')
+    win.configure(bg='#7a1f1f')
+    win.attributes('-topmost', True)
+    _deadman_alert_window = win
+
+    Label(win, text='DEAD-MAN\'S-SWITCH WARNING', bg='#7a1f1f', fg='white',
+          font=('TkDefaultFont', 14, 'bold')).pack(pady=(15, 5))
+    Label(win, bg='#7a1f1f', fg='white', justify='left', wraplength=420, text=
+          'No activity has been detected in this app for over ' +
+          str(DEADMAN_WARNING_IDLE_SECONDS // 60) + ' minutes while the shutter '
+          'doors are open.\n\nIf this is not acknowledged, the doors will close '
+          'automatically in ' + str(DEADMAN_GRACE_SECONDS // 60) + ' minutes.'
+          ).pack(padx=20, pady=5)
+    Button(win, text="I'm Here", width=15, height=2, command=_deadman_acknowledge,
+           bg='white').pack(pady=15)
+
+    # this window closing via the OS 'X' also counts as acknowledging it --
+    # otherwise a dismissed-but-not-acknowledged window would leave the
+    # operator with no visible warning while the grace period still runs out
+    win.protocol("WM_DELETE_WINDOW", _deadman_acknowledge)
+
+
+def _deadman_auto_close():
+    global _deadman_warning_active, _deadman_alert_window, _deadman_last_activity_time
+
+    idle_s = round(time.monotonic() - _deadman_last_activity_time, 1)
+    total_unresponsive_s = None
+    if _deadman_warning_started_at is not None:
+        total_unresponsive_s = round(time.monotonic() - _deadman_warning_started_at, 1)
+
+    log_event('door', 'deadman_switch_auto_close_triggered', idle_s=idle_s,
+              total_unresponsive_s=total_unresponsive_s)
+    listbox.insert(END, ' =========== DEAD-MAN\'S-SWITCH AUTO-CLOSE ===========')
+    listbox.insert(END, ' No response to the dead-man\'s-switch warning -- closing')
+    listbox.insert(END, ' the shutter doors automatically for safety.')
+
+    if _deadman_alert_window is not None:
+        try:
+            _deadman_alert_window.destroy()
+        except Exception:
+            pass
+        _deadman_alert_window = None
+    gui.attributes('-topmost', False)
+
+    _deadman_warning_active = False
+    _deadman_last_activity_time = time.monotonic()
+
+    button_close_door.invoke()
+
+
+def click_button_toggle_deadman_switch():
+    global deadman_enabled
+    deadman_enabled = not deadman_enabled
+    log_event('door', 'deadman_switch_toggle', enabled=deadman_enabled)
+    if deadman_enabled:
+        deadman_switch_led.configure(text='Dead-Man\'s Switch:\nENABLED', bg='lawn green')
+    else:
+        deadman_switch_led.configure(text='Dead-Man\'s Switch:\nDISABLED', bg='gray85')
+        # disabling removes the hazard-check entirely -- resolve any active warning
+        if _deadman_warning_active:
+            _deadman_acknowledge()
+
+
+def deadman_check():
+    global _deadman_last_bell_time
+
+    if not deadman_enabled or door_closed_flag == True:
+        if _deadman_warning_active:
+            _deadman_acknowledge()
+    else:
+        idle = time.monotonic() - _deadman_last_activity_time
+        if not _deadman_warning_active:
+            if idle > DEADMAN_WARNING_IDLE_SECONDS:
+                _raise_deadman_warning()
+        else:
+            if idle > DEADMAN_WARNING_IDLE_SECONDS + DEADMAN_GRACE_SECONDS:
+                _deadman_auto_close()
+            elif time.monotonic() - _deadman_last_bell_time > DEADMAN_BELL_INTERVAL_MS / 1000:
+                _deadman_force_foreground()
+                _deadman_last_bell_time = time.monotonic()
+
+    if exit_flag == True:
+        return
+    gui.after(DEADMAN_CHECK_INTERVAL_MS, deadman_check)
+
+# --- end operator dead-man's-switch ---------------------------------------
+
+
 def click_button_emergency_stop():
 
     global door_opening_flag
@@ -1138,6 +1289,23 @@ door_motion_start_time = None # time.monotonic() when the current motion began; 
 door_fault_flag = False # latched True by a timeout; blocks all door motion until explicitly cleared
 door_fault_direction = None # 'open' or 'close', for the fault message
 
+# operator dead-man's-switch -- if the doors are left open (or partway) with
+# no operator activity anywhere in the app for DEADMAN_WARNING_IDLE_SECONDS,
+# raise an attention-grabbing alert; if that goes unacknowledged for a
+# further DEADMAN_GRACE_SECONDS, close the doors automatically. Modeled on
+# the same kind of safeguard used at Lick Observatory for a remote
+# astronomer falling asleep/walking away with the dome open.
+DEADMAN_WARNING_IDLE_SECONDS = 60 * 60 # 60 min
+DEADMAN_GRACE_SECONDS = 10 * 60 # 10 min after the warning
+DEADMAN_CHECK_INTERVAL_MS = 5000
+DEADMAN_BELL_INTERVAL_MS = 30000 # re-ring/re-lift cadence while a warning is active and unacknowledged
+deadman_enabled = True # on by default -- a safety feature that defaults off only helps if someone remembers to enable it
+_deadman_last_activity_time = None # time.monotonic(), set at startup and by every activity event
+_deadman_warning_active = False # True from when the alert fires until acknowledged or resolved
+_deadman_warning_started_at = None # time.monotonic(), for the grace-period deadline
+_deadman_alert_window = None # the Toplevel alert, or None when not showing
+_deadman_last_bell_time = None # time.monotonic() of the last bell/re-lift nudge
+
 
 
 # assign constants with values
@@ -1425,20 +1593,20 @@ obj_PWM.start(0) # starts the PWM output with a duty cycle of %0 duty cycle, Thi
 gui = Tk()
 topFrame = Frame(gui)
 topFrame.pack
-gui.geometry('575x970+400+200')
+gui.geometry('575x1010+400+200')
 gui.title('test app')
 gui.configure(background='#626567')
 gui.resizable(False, False)  # disables resizing both ways
 
 
 # start code - console open and close doors boarder frames and weather event control boarder frames
-canvas = Canvas(gui, width=575, height=950, bg="#626567", highlightthickness=0)
+canvas = Canvas(gui, width=575, height=990, bg="#626567", highlightthickness=0)
 rect1 = canvas.create_rectangle(31, 40, 262, 125, outline="lightgreen", width=3, fill="")
 rect2 = canvas.create_rectangle(275, 40, 507,125, outline="lightgreen", width=3, fill="")
 
 rect3 = canvas.create_rectangle (66, 450, 457, 535, outline="lightgreen", width=3, fill="")
 
-rect4 = canvas.create_rectangle(20, 630, 555, 920, outline="lightgreen", width=3, fill="")
+rect4 = canvas.create_rectangle(20, 670, 555, 960, outline="lightgreen", width=3, fill="")
 
 canvas.pack()
 # end code - console open and close doors boarder frames and weather event control boarder frames
@@ -1483,20 +1651,28 @@ button_clear_door_fault.place(x=300, y=135)
 
 button_exit = Button(text ='Exit', width = '12', height ='3', command=click_button_exit)
 button_exit.configure(bg = "gray85")
-button_exit.place(x=354,y=565)
+button_exit.place(x=354,y=605)
 
 
 button_emergency_stop = Button(text ='Emergency Stop', width = '23', height ='3',command=click_button_emergency_stop)
 button_emergency_stop.configure(bg = "coral")
-button_emergency_stop.place(x=40,y=565)
+button_emergency_stop.place(x=40,y=605)
 
 button_view_log = Button(text ='View Last\nSession Log', width = '13', height ='3', command=click_button_view_log)
 button_view_log.configure(bg = "gray85")
-button_view_log.place(x=225, y=565)
+button_view_log.place(x=225, y=605)
 
 button_toggle_auto_close = Button(text ='TOGGLE \n Weather Event \n Auto Doors Close', width = '12', height ='4',command=click_button_toggle_auto_close)
 button_toggle_auto_close.configure(bg = "gray85")
 button_toggle_auto_close.place(x=74,y=458)
+
+button_toggle_deadman_switch = Button(text='TOGGLE\nDead-Man\'s Switch', width='15', height='2', command=click_button_toggle_deadman_switch)
+button_toggle_deadman_switch.configure(bg='gray85')
+button_toggle_deadman_switch.place(x=40, y=545)
+
+deadman_switch_led = Button(text='Dead-Man\'s Switch:\nENABLED', width='18', height='2')
+deadman_switch_led.configure(bg='lawn green')
+deadman_switch_led.place(x=280, y=545)
 
 
 # --- Dome (ASCOM Alpaca) driver buttons/switches -----------------------
@@ -1506,29 +1682,29 @@ button_toggle_auto_close.place(x=74,y=458)
 
 label_dome_connect = Button(text='Dome Driver Connection', width='22', height='1',
                              relief='flat', bg='#626567', fg='white')
-label_dome_connect.place(x=40, y=638)
-switch_dome_connect = ToggleSwitch(gui, x=40, y=662, on_click=click_switch_dome_connect,
+label_dome_connect.place(x=40, y=678)
+switch_dome_connect = ToggleSwitch(gui, x=40, y=702, on_click=click_switch_dome_connect,
                                     off_text='Disconnected', on_text='Connected')
 
 label_dome_cover = Button(text='Mirror Cover', width='14', height='1',
                            relief='flat', bg='#626567', fg='white')
-label_dome_cover.place(x=40, y=702)
-switch_dome_cover = ToggleSwitch(gui, x=40, y=726, on_click=click_switch_dome_cover,
+label_dome_cover.place(x=40, y=742)
+switch_dome_cover = ToggleSwitch(gui, x=40, y=766, on_click=click_switch_dome_cover,
                                   off_text='Closed', on_text='Open')
 
 label_dome_track = Button(text='Telescope Tracking', width='18', height='1',
                            relief='flat', bg='#626567', fg='white')
-label_dome_track.place(x=40, y=766)
-switch_dome_track = ToggleSwitch(gui, x=40, y=790, on_click=click_switch_dome_track,
+label_dome_track.place(x=40, y=806)
+switch_dome_track = ToggleSwitch(gui, x=40, y=830, on_click=click_switch_dome_track,
                                   off_text='Off', on_text='On')
 
 button_dome_find_home = Button(text ='Find Dome\nHome', width = '10', height ='3', command=click_button_dome_find_home)
 button_dome_find_home.configure(bg = "white")
-button_dome_find_home.place(x=40, y=830)
+button_dome_find_home.place(x=40, y=870)
 
 button_dome_stop = Button(text ='Stop Dome\nRotation', width = '11', height ='3', command=click_button_dome_stop)
 button_dome_stop.configure(bg = "coral")
-button_dome_stop.place(x=390, y=830)
+button_dome_stop.place(x=390, y=870)
 
 # --- end dome (ASCOM Alpaca) driver buttons/switches -------------------
 
@@ -1567,11 +1743,11 @@ weather_event_indicator_led.configure(bg = "gray85")
 # --- Dome (ASCOM Alpaca) driver LEDs/readouts ---------------------------
 
 dome_at_home_led = Button(text = "Dome Home:\nNo", width = '14', height = '3')
-dome_at_home_led.place(x=260, y=830)
+dome_at_home_led.place(x=260, y=870)
 dome_at_home_led.configure(bg = "gray85")
 
 dome_azimuth_display = Button(text = "Azimuth:\n--.- deg", width = '14', height = '3')
-dome_azimuth_display.place(x=310, y=638)
+dome_azimuth_display.place(x=310, y=678)
 dome_azimuth_display.configure(bg = "gray85")
 
 # --- end dome (ASCOM Alpaca) driver LEDs/readouts ------------------------
@@ -1601,13 +1777,20 @@ listbox.configure(fg='#66FF00')
 
 
 log_event('system', 'session_start', script=os.path.basename(__file__), log_path=SESSION_LOG_PATH,
-          python_version=sys.version.split()[0], door_motion_timeout_s=DOOR_MOTION_TIMEOUT_SECONDS)
+          python_version=sys.version.split()[0], door_motion_timeout_s=DOOR_MOTION_TIMEOUT_SECONDS,
+          deadman_warning_idle_s=DEADMAN_WARNING_IDLE_SECONDS, deadman_grace_s=DEADMAN_GRACE_SECONDS)
+
+_deadman_last_activity_time = time.monotonic()
+gui.bind_all('<Motion>', _on_deadman_activity, add='+')
+gui.bind_all('<Button>', _on_deadman_activity, add='+')
+gui.bind_all('<Key>', _on_deadman_activity, add='+')
 
 gui.after(30, task)
 gui.after(50, task2)
 gui.after(150, task3)
 gui.after(DOME_STATUS_POLL_MS, poll_dome_status)
 gui.after(DOME_AZIMUTH_POLL_MS, poll_dome_azimuth)
+gui.after(DEADMAN_CHECK_INTERVAL_MS, deadman_check)
 gui.protocol("WM_DELETE_WINDOW", click_button_exit) # route the OS close (X) button through the same safe-shutdown path as the Exit button, not straight to exit_now
 gui.mainloop()
 
