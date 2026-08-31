@@ -1,0 +1,47 @@
+{"ts": "2026-08-31T10:49:03.650", "t_rel_s": 2.247, "level": "INFO", "category": "system", "event": "session_start", "script": "leusch_shutter_control_py3_weather_mirror_cover_ascom.py", "log_path": "logs/session_20260831_104901.jsonl", "python_version": "3.13.5"}
+{"ts": "2026-08-31T10:49:03.790", "t_rel_s": 2.388, "level": "INFO", "category": "system", "event": "first_boot", "python_version": "Python Version - 3.13.5", "door_opened": false, "door_closed": true, "pwm_open_duty": 60.625, "pwm_close_duty": 43.625, "gpio_pins": {"door_opened_input": 16, "door_closed_input": 20, "weather_event_input": 21, "pwm_output": 5}}
+{"ts": "2026-08-31T10:49:03.790", "t_rel_s": 2.388, "level": "INFO", "category": "door", "event": "limit_switch_change", "switch": "door_closed", "value": true}
+{"ts": "2026-08-31T10:49:31.070", "t_rel_s": 29.668, "level": "INFO", "category": "dome", "event": "connect_command", "target_connected": true}
+{"ts": "2026-08-31T10:49:31.174", "t_rel_s": 29.772, "level": "INFO", "category": "alpaca", "event": "put_ok", "attribute": "connected", "txn": 1, "params": {"Connected": true}, "latency_ms": 102.3, "value": null}
+{"ts": "2026-08-31T10:49:31.181", "t_rel_s": 29.779, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "connected", "txn": 2, "latency_ms": 6.6, "value": true}
+{"ts": "2026-08-31T10:49:31.189", "t_rel_s": 29.786, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "connected", "txn": 3, "latency_ms": 6.8, "value": true}
+{"ts": "2026-08-31T10:49:31.199", "t_rel_s": 29.797, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "shutterstatus", "txn": 4, "latency_ms": 9.9, "value": 1}
+{"ts": "2026-08-31T10:49:31.205", "t_rel_s": 29.802, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "slewing", "txn": 5, "latency_ms": 5.5, "value": false}
+{"ts": "2026-08-31T10:49:31.211", "t_rel_s": 29.809, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "athome", "txn": 6, "latency_ms": 6.2, "value": true}
+{"ts": "2026-08-31T10:49:31.218", "t_rel_s": 29.815, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "atpark", "txn": 7, "latency_ms": 6.0, "value": true}
+{"ts": "2026-08-31T10:49:31.224", "t_rel_s": 29.821, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "slaved", "txn": 8, "latency_ms": 5.9, "value": false}
+{"ts": "2026-08-31T10:49:31.224", "t_rel_s": 29.822, "level": "INFO", "category": "dome", "event": "state_changed", "field": "shutter_status", "old_value": null, "new_value": 1}
+{"ts": "2026-08-31T10:49:31.225", "t_rel_s": 29.822, "level": "INFO", "category": "dome", "event": "state_changed", "field": "at_home", "old_value": false, "new_value": true}
+{"ts": "2026-08-31T10:49:31.225", "t_rel_s": 29.822, "level": "INFO", "category": "dome", "event": "state_changed", "field": "at_park", "old_value": false, "new_value": true}
+{"ts": "2026-08-31T10:49:31.321", "t_rel_s": 29.918, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 9, "latency_ms": 8.0, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:31.521", "t_rel_s": 30.118, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 10, "latency_ms": 8.0, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:31.721", "t_rel_s": 30.318, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 11, "latency_ms": 8.1, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:31.922", "t_rel_s": 30.52, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 12, "latency_ms": 9.3, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:32.122", "t_rel_s": 30.719, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 13, "latency_ms": 8.4, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:32.322", "t_rel_s": 30.92, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 14, "latency_ms": 8.8, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:32.522", "t_rel_s": 31.12, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 15, "latency_ms": 8.4, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:32.722", "t_rel_s": 31.32, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 16, "latency_ms": 8.7, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:32.925", "t_rel_s": 31.522, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 17, "latency_ms": 10.7, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:33.122", "t_rel_s": 31.72, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 18, "latency_ms": 8.3, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:33.323", "t_rel_s": 31.92, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 19, "latency_ms": 8.4, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:33.526", "t_rel_s": 32.124, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 20, "latency_ms": 11.5, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:33.662", "t_rel_s": 32.259, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "connected", "txn": 21, "latency_ms": 10.3, "value": true}
+{"ts": "2026-08-31T10:49:33.668", "t_rel_s": 32.266, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "shutterstatus", "txn": 22, "latency_ms": 6.3, "value": 1}
+{"ts": "2026-08-31T10:49:33.675", "t_rel_s": 32.272, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "slewing", "txn": 23, "latency_ms": 6.3, "value": false}
+{"ts": "2026-08-31T10:49:33.681", "t_rel_s": 32.279, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "athome", "txn": 24, "latency_ms": 6.0, "value": true}
+{"ts": "2026-08-31T10:49:33.688", "t_rel_s": 32.286, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "atpark", "txn": 25, "latency_ms": 6.5, "value": true}
+{"ts": "2026-08-31T10:49:33.695", "t_rel_s": 32.292, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "slaved", "txn": 26, "latency_ms": 6.6, "value": false}
+{"ts": "2026-08-31T10:49:33.723", "t_rel_s": 32.32, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 27, "latency_ms": 8.1, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:33.927", "t_rel_s": 32.524, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 28, "latency_ms": 11.8, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:34.127", "t_rel_s": 32.724, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 29, "latency_ms": 11.9, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:34.323", "t_rel_s": 32.921, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 30, "latency_ms": 8.0, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:34.524", "t_rel_s": 33.121, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 31, "latency_ms": 8.5, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:34.724", "t_rel_s": 33.321, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 32, "latency_ms": 8.3, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:34.928", "t_rel_s": 33.525, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 33, "latency_ms": 11.9, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:35.124", "t_rel_s": 33.722, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 34, "latency_ms": 8.5, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:35.328", "t_rel_s": 33.926, "level": "DEBUG", "category": "alpaca", "event": "get_ok", "attribute": "azimuth", "txn": 35, "latency_ms": 12.0, "value": 71.6021052631579}
+{"ts": "2026-08-31T10:49:35.451", "t_rel_s": 34.049, "level": "INFO", "category": "dome", "event": "connect_command", "target_connected": false}
+{"ts": "2026-08-31T10:49:35.459", "t_rel_s": 34.056, "level": "INFO", "category": "alpaca", "event": "put_ok", "attribute": "connected", "txn": 36, "params": {"Connected": false}, "latency_ms": 7.4, "value": null}
+{"ts": "2026-08-31T10:49:35.466", "t_rel_s": 34.063, "level": "INFO", "category": "alpaca", "event": "get_ok", "attribute": "connected", "txn": 37, "latency_ms": 6.5, "value": false}
+{"ts": "2026-08-31T10:51:04.393", "t_rel_s": 122.99, "level": "INFO", "category": "system", "event": "shutdown_requested"}
+{"ts": "2026-08-31T10:51:04.594", "t_rel_s": 123.191, "level": "INFO", "category": "system", "event": "session_end"}

@@ -1,0 +1,12 @@
+{"ts": "2026-08-31T12:08:20.197", "t_rel_s": 2.254, "level": "INFO", "category": "system", "event": "session_start", "script": "leusch_shutter_control_py3_weather_mirror_cover_ascom.py", "log_path": "logs/session_20260831_120817.jsonl", "python_version": "3.13.5", "door_motion_timeout_s": 90}
+{"ts": "2026-08-31T12:08:20.356", "t_rel_s": 2.414, "level": "INFO", "category": "system", "event": "first_boot", "python_version": "Python Version - 3.13.5", "door_opened": false, "door_closed": false, "pwm_open_duty": 60.625, "pwm_close_duty": 43.625, "gpio_pins": {"door_opened_input": 16, "door_closed_input": 20, "weather_event_input": 21, "pwm_output": 5}}
+{"ts": "2026-08-31T12:08:32.257", "t_rel_s": 14.315, "level": "INFO", "category": "door", "event": "open_door_command", "accepted": true}
+{"ts": "2026-08-31T12:08:32.263", "t_rel_s": 14.32, "level": "INFO", "category": "door", "event": "motor_drive_start", "direction": "open", "duty_cycle": 60.625}
+{"ts": "2026-08-31T12:08:34.951", "t_rel_s": 17.008, "level": "INFO", "category": "door", "event": "emergency_stop_activated"}
+{"ts": "2026-08-31T12:08:34.960", "t_rel_s": 17.017, "level": "INFO", "category": "door", "event": "emergency_stop_limit_readback", "door_opened": false, "door_closed": false}
+{"ts": "2026-08-31T12:08:45.082", "t_rel_s": 27.139, "level": "INFO", "category": "door", "event": "close_door_command", "accepted": true}
+{"ts": "2026-08-31T12:08:45.098", "t_rel_s": 27.156, "level": "INFO", "category": "door", "event": "motor_drive_start", "direction": "close", "duty_cycle": 43.625}
+{"ts": "2026-08-31T12:08:52.884", "t_rel_s": 34.941, "level": "INFO", "category": "door", "event": "limit_switch_change", "switch": "door_closed", "value": true}
+{"ts": "2026-08-31T12:08:52.905", "t_rel_s": 34.963, "level": "INFO", "category": "door", "event": "motor_drive_stop", "direction": "close", "reason": "limit_switch_reached"}
+{"ts": "2026-08-31T12:09:03.041", "t_rel_s": 45.098, "level": "INFO", "category": "system", "event": "shutdown_requested"}
+{"ts": "2026-08-31T12:09:03.242", "t_rel_s": 45.299, "level": "INFO", "category": "system", "event": "session_end"}

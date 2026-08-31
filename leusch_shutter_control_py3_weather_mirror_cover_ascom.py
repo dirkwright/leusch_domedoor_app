@@ -12,6 +12,10 @@ class gui():
 # start function definitions and click event functions **************************************
 
 def click_button_open_door():
+    if door_fault_flag:
+        log_event('door', 'open_door_command', accepted=False, reason='motion_timeout_fault_active')
+        listbox.insert(END, ' Door motion fault active -- clear the fault before opening the doors')
+        return
     if GPIO.input(GPIO_weather_event_input)==True and auto_door_close == True:
         log_event('door', 'open_door_command', accepted=False, reason='weather_lockout')
         return
@@ -35,6 +39,10 @@ def click_button_open_door():
         log_event('door', 'open_door_command', accepted=False, reason='motion_in_progress')
 
 def click_button_close_door():
+    if door_fault_flag:
+        log_event('door', 'close_door_command', accepted=False, reason='motion_timeout_fault_active')
+        listbox.insert(END, ' Door motion fault active -- clear the fault before closing the doors')
+        return
     button_emergency_stop.configure(bg = "coral")
     button_emergency_stop.configure(text = "Emergency Stop")
     global door_closed_flag
@@ -499,12 +507,88 @@ def poll_dome_azimuth():
 # --- end dome (ASCOM Alpaca) driver controls -------------------------------
 
 
+# --- Door motion timeout fault ------------------------------------------
+# Deliberately separate from Emergency Stop: E-Stop is always available and
+# stays a plain "stop now" action, unaffected by this latch. A timeout
+# means the door didn't do what it was told within a generous margin above
+# real measured travel time (~58.5s open/~45.3s close) -- treated as a
+# probable mechanical fault (obstruction, jam, broken/misaligned limit
+# switch, drive coupling failure), not a transient delay, so it stays
+# latched and blocks all further door motion until explicitly cleared.
+
+def _trigger_door_motion_fault(direction, elapsed):
+    global door_opening_flag, door_closing_flag, door_fault_flag, door_fault_direction
+
+    obj_PWM.ChangeDutyCycle(0)
+    door_opening_flag = False
+    door_closing_flag = False
+    door_opening_led.configure(background='gray85')
+    door_closing_led.configure(background='gray85')
+
+    door_fault_flag = True
+    door_fault_direction = direction
+
+    log_event('door', 'motion_timeout_fault', direction=direction,
+              elapsed_s=round(elapsed, 1), timeout_s=DOOR_MOTION_TIMEOUT_SECONDS,
+              door_opened_switch=GPIO.input(GPIO_door_opened_input) == True,
+              door_closed_switch=GPIO.input(GPIO_door_closed_input) == True)
+
+    door_fault_led.configure(
+        bg='red',
+        text='DOOR MOTION TIMEOUT FAULT -- ' + direction.upper() + ' did not complete in '
+             + str(DOOR_MOTION_TIMEOUT_SECONDS) + 's. Motor stopped. See message below.')
+    button_clear_door_fault.configure(state='normal')
+
+    listbox.insert(END, '=========== DOOR MOTION TIMEOUT FAULT ===========')
+    listbox.insert(END, ' Door ' + direction + ' did not reach its limit switch within '
+                   + str(DOOR_MOTION_TIMEOUT_SECONDS) + ' seconds -- motor stopped.')
+    listbox.insert(END, ' This likely indicates a mechanical problem: obstruction, jam,')
+    listbox.insert(END, ' broken/misaligned limit switch, or a drive coupling failure.')
+    listbox.insert(END, ' All door motion is now BLOCKED until this fault is cleared.')
+    listbox.insert(END, ' Recommended: physically inspect the door and drive mechanism')
+    listbox.insert(END, ' before clicking "Clear Door Fault". Do not clear and retry')
+    listbox.insert(END, ' blindly unless the cause is understood and resolved.')
+    listbox.insert(END, '==================================================')
+
+    messagebox.showerror(
+        'Door Motion Timeout Fault',
+        'The shutter door ' + direction + ' motion did not complete within '
+        + str(DOOR_MOTION_TIMEOUT_SECONDS) + ' seconds and has been stopped.\n\n'
+        'This likely indicates a mechanical problem (obstruction, jam, a broken or '
+        'misaligned limit switch, or a drive coupling failure) rather than a normal '
+        'delay.\n\n'
+        'All door motion is now blocked until this fault is cleared.\n\n'
+        'Recommended: physically inspect the door and drive mechanism before '
+        'clearing this fault. Do not clear it and retry blindly unless you '
+        'understand and have addressed the cause.')
+
+
+def click_button_clear_door_fault():
+    global door_fault_flag, door_fault_direction, door_motion_start_time
+
+    if not door_fault_flag:
+        return
+
+    log_event('door', 'motion_timeout_fault_cleared', direction=door_fault_direction)
+
+    door_fault_flag = False
+    door_fault_direction = None
+    door_motion_start_time = None
+
+    door_fault_led.configure(bg='gray85', text='Door Motion: Normal')
+    button_clear_door_fault.configure(state='disabled')
+    listbox.insert(END, ' Door motion timeout fault cleared by operator.')
+
+# --- end door motion timeout fault ---------------------------------------
+
+
 def click_button_emergency_stop():
 
     global door_opening_flag
     global door_closing_flag
     global door_opened_flag
     global door_closed_flag
+    global door_motion_start_time
 
     obj_PWM.ChangeDutyCycle(0)
     log_event('door', 'emergency_stop_activated')
@@ -513,6 +597,7 @@ def click_button_emergency_stop():
     door_opening_led.configure(background='gray85')
     door_closing_flag = False
     door_closing_led.configure(background='gray85')
+    door_motion_start_time = None
 
     count = listbox.size()
     if count >= 25:
@@ -626,6 +711,7 @@ def task():
     global door_closed_flag
     global time_string
     global time_string_complete
+    global door_motion_start_time
 
 
 
@@ -635,41 +721,44 @@ def task():
 # open door or closed selection *********************************************************************************
 
     if button_changed_flag == True:
-        
+
         if button_selection == 1: # select open door- offset from center increased 25% (50 + 10.625), was 50 + 8.5
             obj_PWM.ChangeDutyCycle(60.625)
             log_event('door', 'motor_drive_start', direction='open', duty_cycle=60.625)
+            door_motion_start_time = time.monotonic()
             door_opening_led.configure(background='lawn green')
             door_closing_led.configure(background='gray85')
-            
+
             count = listbox.size()
             if count >= 25:
                 listbox.delete(0, 5)
 
-                
+
             listbox.insert(END,'Shutter Doors Opening - In Process')
             listbox.insert(END,' ----')
-            door_opening_flag = True         
+            door_opening_flag = True
         if button_selection == 2: # select close door- offset from center reduced another 25% (50 - 6.375), was 50 - 8.5
             obj_PWM.ChangeDutyCycle(43.625)
             log_event('door', 'motor_drive_start', direction='close', duty_cycle=43.625)
+            door_motion_start_time = time.monotonic()
             door_opening_led.configure(background='gray85')
             door_closing_led.configure(background='lawn green')
 
             count = listbox.size()
             if count >= 25:
                 listbox.delete(0, 5)
-            
+
             listbox.insert(END,'Shutter Doors Closing - In Process')
             listbox.insert(END,' ----')
             door_closing_flag = True
 
 # reset the door_opening_flag or door_closing_flag because the motor is no longer in motion,
-# and set the motor to idle at 1.5ms pulse width   
+# and set the motor to idle at 1.5ms pulse width
     if door_opening_flag == True and door_opened_flag == True:
         obj_PWM.ChangeDutyCycle(0)
         log_event('door', 'motor_drive_stop', direction='open', reason='limit_switch_reached')
         door_opening_flag = False
+        door_motion_start_time = None
         door_opening_led.configure(background='gray85')
 
         # write "doors open" to listbox
@@ -685,6 +774,7 @@ def task():
         obj_PWM.ChangeDutyCycle(0)
         log_event('door', 'motor_drive_stop', direction='close', reason='limit_switch_reached')
         door_closing_flag = False
+        door_motion_start_time = None
         door_closing_led.configure(background='gray85')
 
         # write "doors close" to listbox
@@ -695,6 +785,14 @@ def task():
         time_string = now.strftime("%d %B %Y, %H:%M:%S")
         time_string_complete = ("Timestamp ------ " +  time_string)
         listbox.insert(END, time_string_complete)
+
+    # motion-timeout fault check: a genuine completion above always takes
+    # precedence (door_opening_flag/door_closing_flag would already be False
+    # by the time this runs if the limit switch was reached this same tick)
+    if (door_opening_flag == True or door_closing_flag == True) and door_motion_start_time is not None:
+        elapsed = time.monotonic() - door_motion_start_time
+        if elapsed > DOOR_MOTION_TIMEOUT_SECONDS:
+            _trigger_door_motion_fault('open' if door_opening_flag == True else 'close', elapsed)
 
     button_changed_flag = False
 
@@ -1029,6 +1127,17 @@ weather_read_delay_index = 0
 log_write_weather_event_flag = False
 _prev_weather_active = False # for logging weather-sensor transitions only, not every task3 poll tick
 
+# door motion timeout fault -- if an open/close never reaches its limit
+# switch within DOOR_MOTION_TIMEOUT_SECONDS, that's treated as a probable
+# mechanical fault (jam, obstruction, broken/misaligned limit switch, drive
+# coupling failure), not a transient delay: motor stops, all further door
+# motion is blocked, and it stays blocked until the operator explicitly
+# clears it -- see _trigger_door_motion_fault()/click_button_clear_door_fault()
+DOOR_MOTION_TIMEOUT_SECONDS = 90
+door_motion_start_time = None # time.monotonic() when the current motion began; None while idle
+door_fault_flag = False # latched True by a timeout; blocks all door motion until explicitly cleared
+door_fault_direction = None # 'open' or 'close', for the fault message
+
 
 
 # assign constants with values
@@ -1316,20 +1425,20 @@ obj_PWM.start(0) # starts the PWM output with a duty cycle of %0 duty cycle, Thi
 gui = Tk()
 topFrame = Frame(gui)
 topFrame.pack
-gui.geometry('575x930+400+200')
+gui.geometry('575x970+400+200')
 gui.title('test app')
 gui.configure(background='#626567')
 gui.resizable(False, False)  # disables resizing both ways
 
 
 # start code - console open and close doors boarder frames and weather event control boarder frames
-canvas = Canvas(gui, width=575, height=910, bg="#626567", highlightthickness=0)
+canvas = Canvas(gui, width=575, height=950, bg="#626567", highlightthickness=0)
 rect1 = canvas.create_rectangle(31, 40, 262, 125, outline="lightgreen", width=3, fill="")
 rect2 = canvas.create_rectangle(275, 40, 507,125, outline="lightgreen", width=3, fill="")
 
-rect3 = canvas.create_rectangle (66, 410, 457, 495, outline="lightgreen", width=3, fill="")
+rect3 = canvas.create_rectangle (66, 450, 457, 535, outline="lightgreen", width=3, fill="")
 
-rect4 = canvas.create_rectangle(20, 590, 555, 880, outline="lightgreen", width=3, fill="")
+rect4 = canvas.create_rectangle(20, 630, 555, 920, outline="lightgreen", width=3, fill="")
 
 canvas.pack()
 # end code - console open and close doors boarder frames and weather event control boarder frames
@@ -1358,22 +1467,36 @@ button_close_door = Button(text ='Close Shutter \n Doors', width = '8', height =
 button_close_door.configure(bg = "white")
 button_close_door.place(x=40,y=50)
 
+
+# --- Door motion timeout fault indicator/clear -------------------------
+
+door_fault_led = Button(text='Door Motion: Normal', width='34', height='2')
+door_fault_led.configure(bg='gray85')
+door_fault_led.place(x=40, y=135)
+
+button_clear_door_fault = Button(text='Clear Door\nFault', width='15', height='2', command=click_button_clear_door_fault)
+button_clear_door_fault.configure(bg='gray85', state='disabled')
+button_clear_door_fault.place(x=300, y=135)
+
+# --- end door motion timeout fault indicator/clear ----------------------
+
+
 button_exit = Button(text ='Exit', width = '12', height ='3', command=click_button_exit)
 button_exit.configure(bg = "gray85")
-button_exit.place(x=354,y=525)
+button_exit.place(x=354,y=565)
 
 
 button_emergency_stop = Button(text ='Emergency Stop', width = '23', height ='3',command=click_button_emergency_stop)
 button_emergency_stop.configure(bg = "coral")
-button_emergency_stop.place(x=40,y=525)
+button_emergency_stop.place(x=40,y=565)
 
 button_view_log = Button(text ='View Last\nSession Log', width = '13', height ='3', command=click_button_view_log)
 button_view_log.configure(bg = "gray85")
-button_view_log.place(x=225, y=525)
+button_view_log.place(x=225, y=565)
 
 button_toggle_auto_close = Button(text ='TOGGLE \n Weather Event \n Auto Doors Close', width = '12', height ='4',command=click_button_toggle_auto_close)
 button_toggle_auto_close.configure(bg = "gray85")
-button_toggle_auto_close.place(x=74,y=418)
+button_toggle_auto_close.place(x=74,y=458)
 
 
 # --- Dome (ASCOM Alpaca) driver buttons/switches -----------------------
@@ -1383,29 +1506,29 @@ button_toggle_auto_close.place(x=74,y=418)
 
 label_dome_connect = Button(text='Dome Driver Connection', width='22', height='1',
                              relief='flat', bg='#626567', fg='white')
-label_dome_connect.place(x=40, y=598)
-switch_dome_connect = ToggleSwitch(gui, x=40, y=622, on_click=click_switch_dome_connect,
+label_dome_connect.place(x=40, y=638)
+switch_dome_connect = ToggleSwitch(gui, x=40, y=662, on_click=click_switch_dome_connect,
                                     off_text='Disconnected', on_text='Connected')
 
 label_dome_cover = Button(text='Mirror Cover', width='14', height='1',
                            relief='flat', bg='#626567', fg='white')
-label_dome_cover.place(x=40, y=662)
-switch_dome_cover = ToggleSwitch(gui, x=40, y=686, on_click=click_switch_dome_cover,
+label_dome_cover.place(x=40, y=702)
+switch_dome_cover = ToggleSwitch(gui, x=40, y=726, on_click=click_switch_dome_cover,
                                   off_text='Closed', on_text='Open')
 
 label_dome_track = Button(text='Telescope Tracking', width='18', height='1',
                            relief='flat', bg='#626567', fg='white')
-label_dome_track.place(x=40, y=726)
-switch_dome_track = ToggleSwitch(gui, x=40, y=750, on_click=click_switch_dome_track,
+label_dome_track.place(x=40, y=766)
+switch_dome_track = ToggleSwitch(gui, x=40, y=790, on_click=click_switch_dome_track,
                                   off_text='Off', on_text='On')
 
 button_dome_find_home = Button(text ='Find Dome\nHome', width = '10', height ='3', command=click_button_dome_find_home)
 button_dome_find_home.configure(bg = "white")
-button_dome_find_home.place(x=40, y=790)
+button_dome_find_home.place(x=40, y=830)
 
 button_dome_stop = Button(text ='Stop Dome\nRotation', width = '11', height ='3', command=click_button_dome_stop)
 button_dome_stop.configure(bg = "coral")
-button_dome_stop.place(x=390, y=790)
+button_dome_stop.place(x=390, y=830)
 
 # --- end dome (ASCOM Alpaca) driver buttons/switches -------------------
 
@@ -1434,21 +1557,21 @@ door_closed_led = Button(text = "Doors Are Closed", width = '11', height = '1')
 door_closed_led.place (x=138, y=88)
 
 auto_close_doors_enabled_disabled_led = Button(text = "Auto Doors Close \n DISABLED", width = '12', height = '4')
-auto_close_doors_enabled_disabled_led.place (x=208, y=418)
+auto_close_doors_enabled_disabled_led.place (x=208, y=458)
 
 weather_event_indicator_led = Button(text = "No Weather \n Event Detected", width = '10', height = '4')
-weather_event_indicator_led.place (x=341, y=418)
+weather_event_indicator_led.place (x=341, y=458)
 weather_event_indicator_led.configure(bg = "gray85")
 
 
 # --- Dome (ASCOM Alpaca) driver LEDs/readouts ---------------------------
 
 dome_at_home_led = Button(text = "Dome Home:\nNo", width = '14', height = '3')
-dome_at_home_led.place(x=260, y=790)
+dome_at_home_led.place(x=260, y=830)
 dome_at_home_led.configure(bg = "gray85")
 
 dome_azimuth_display = Button(text = "Azimuth:\n--.- deg", width = '14', height = '3')
-dome_azimuth_display.place(x=310, y=598)
+dome_azimuth_display.place(x=310, y=638)
 dome_azimuth_display.configure(bg = "gray85")
 
 # --- end dome (ASCOM Alpaca) driver LEDs/readouts ------------------------
@@ -1463,7 +1586,7 @@ dome_azimuth_display.configure(bg = "gray85")
 # start create listbox ************************************************************************************************
 
 listbox = Listbox(gui, width = '60', height = '15')
-listbox.place(x=33,y=150)
+listbox.place(x=33,y=190)
 listbox.configure(background='#000000')
 listbox.configure(fg='#66FF00')
 
@@ -1478,7 +1601,7 @@ listbox.configure(fg='#66FF00')
 
 
 log_event('system', 'session_start', script=os.path.basename(__file__), log_path=SESSION_LOG_PATH,
-          python_version=sys.version.split()[0])
+          python_version=sys.version.split()[0], door_motion_timeout_s=DOOR_MOTION_TIMEOUT_SECONDS)
 
 gui.after(30, task)
 gui.after(50, task2)
