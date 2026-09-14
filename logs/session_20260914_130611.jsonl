@@ -1,0 +1,5 @@
+{"ts": "2026-09-14T13:06:13.783", "t_rel_s": 2.25, "level": "INFO", "category": "system", "event": "session_start", "script": "leusch_shutter_control_py3_weather_mirror_cover_ascom.py", "log_path": "logs/session_20260914_130611.jsonl", "python_version": "3.13.5", "door_motion_timeout_s": 90, "deadman_warning_idle_s": 3600, "deadman_grace_s": 600}
+{"ts": "2026-09-14T13:06:13.837", "t_rel_s": 2.304, "level": "INFO", "category": "system", "event": "first_boot", "python_version": "Python Version - 3.13.5", "door_opened": false, "door_closed": true, "pwm_open_duty": 60.625, "pwm_close_duty": 43.625, "gpio_pins": {"door_opened_input": 16, "door_closed_input": 20, "weather_event_input": 21, "pwm_output": 5}}
+{"ts": "2026-09-14T13:06:13.838", "t_rel_s": 2.305, "level": "INFO", "category": "door", "event": "limit_switch_change", "switch": "door_closed", "value": true}
+{"ts": "2026-09-14T13:06:39.451", "t_rel_s": 27.918, "level": "INFO", "category": "system", "event": "shutdown_requested"}
+{"ts": "2026-09-14T13:06:39.652", "t_rel_s": 28.119, "level": "INFO", "category": "system", "event": "session_end"}

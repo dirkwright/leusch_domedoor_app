@@ -20,7 +20,7 @@ def click_button_open_door():
         log_event('door', 'open_door_command', accepted=False, reason='weather_lockout')
         return
     button_emergency_stop.configure(bg = "coral")
-    button_emergency_stop.configure(text = "Emergency Stop")
+    button_emergency_stop.configure(text = "Shutter Doors\nEmergency Stop")
     global door_opened_flag
     global button_changed_flag
     global button_selection
@@ -44,7 +44,7 @@ def click_button_close_door():
         listbox.insert(END, ' Door motion fault active -- clear the fault before closing the doors')
         return
     button_emergency_stop.configure(bg = "coral")
-    button_emergency_stop.configure(text = "Emergency Stop")
+    button_emergency_stop.configure(text = "Shutter Doors\nEmergency Stop")
     global door_closed_flag
     global button_changed_flag
     global button_selection
@@ -70,17 +70,16 @@ def click_button_close_door():
         log_event('door', 'close_door_command', accepted=False, reason='motion_in_progress')
 
 
-def click_button_toggle_auto_close():
+def click_switch_auto_close():
     global auto_door_close
+    auto_door_close = not auto_door_close
+    switch_auto_close.set_state(auto_door_close)
     if auto_door_close == True:
-        auto_door_close = False
-        auto_close_doors_enabled_disabled_led.configure (text = "Auto Doors Close \n DISABLED")
-        auto_close_doors_enabled_disabled_led.configure(bg='gray85')
-
-    else:
-        auto_door_close = True
         auto_close_doors_enabled_disabled_led.configure (text = "Auto Doors Close \n ENABLED")
         auto_close_doors_enabled_disabled_led.configure(bg="yellow")
+    else:
+        auto_close_doors_enabled_disabled_led.configure (text = "Auto Doors Close \n DISABLED")
+        auto_close_doors_enabled_disabled_led.configure(bg='gray85')
 
     log_event('door', 'auto_close_toggle', enabled=auto_door_close)
     print (" the value of auto_door_close ==", auto_door_close)
@@ -695,9 +694,10 @@ def _deadman_auto_close():
     button_close_door.invoke()
 
 
-def click_button_toggle_deadman_switch():
+def click_switch_deadman():
     global deadman_enabled
     deadman_enabled = not deadman_enabled
+    switch_deadman.set_state(deadman_enabled)
     log_event('door', 'deadman_switch_toggle', enabled=deadman_enabled)
     if deadman_enabled:
         deadman_switch_led.configure(text='Dead-Man\'s Switch:\nENABLED', bg='lawn green')
@@ -709,13 +709,23 @@ def click_button_toggle_deadman_switch():
 
 
 def deadman_check():
-    global _deadman_last_bell_time
+    global _deadman_last_bell_time, _deadman_last_heartbeat_time
 
     if not deadman_enabled or door_closed_flag == True:
+        # not armed -- reset so the next time it becomes armed, the first
+        # heartbeat fires immediately rather than waiting up to 5 more minutes
+        _deadman_last_heartbeat_time = None
         if _deadman_warning_active:
             _deadman_acknowledge()
     else:
         idle = time.monotonic() - _deadman_last_activity_time
+
+        if _deadman_last_heartbeat_time is None or \
+           time.monotonic() - _deadman_last_heartbeat_time > DEADMAN_HEARTBEAT_INTERVAL_MS / 1000:
+            log_event('door', 'deadman_switch_heartbeat', level='DEBUG',
+                      idle_s=round(idle, 1), warning_active=_deadman_warning_active)
+            _deadman_last_heartbeat_time = time.monotonic()
+
         if not _deadman_warning_active:
             if idle > DEADMAN_WARNING_IDLE_SECONDS:
                 _raise_deadman_warning()
@@ -781,7 +791,7 @@ def click_button_emergency_stop():
         listbox.insert(END,' The Shutter Doors Sensor Reads --- Doors Not Closed')
     
     button_emergency_stop.configure(bg = "red")
-    button_emergency_stop.configure(text = "Emergency Stop Activated")
+    button_emergency_stop.configure(text = "Shutter Doors\nE-STOP ACTIVE")
 
     log_event('door', 'emergency_stop_limit_readback', door_opened=door_opened_flag, door_closed=door_closed_flag)
 
@@ -1299,12 +1309,15 @@ DEADMAN_WARNING_IDLE_SECONDS = 60 * 60 # 60 min
 DEADMAN_GRACE_SECONDS = 10 * 60 # 10 min after the warning
 DEADMAN_CHECK_INTERVAL_MS = 5000
 DEADMAN_BELL_INTERVAL_MS = 30000 # re-ring/re-lift cadence while a warning is active and unacknowledged
+DEADMAN_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000 # quiet DEBUG-level proof-of-life while armed, so a future log can
+                                                # confirm this ran (rather than inferring it from an absent warning)
 deadman_enabled = True # on by default -- a safety feature that defaults off only helps if someone remembers to enable it
 _deadman_last_activity_time = None # time.monotonic(), set at startup and by every activity event
 _deadman_warning_active = False # True from when the alert fires until acknowledged or resolved
 _deadman_warning_started_at = None # time.monotonic(), for the grace-period deadline
 _deadman_alert_window = None # the Toplevel alert, or None when not showing
 _deadman_last_bell_time = None # time.monotonic() of the last bell/re-lift nudge
+_deadman_last_heartbeat_time = None # time.monotonic() of the last heartbeat log line, or None to fire one immediately
 
 
 
@@ -1593,20 +1606,31 @@ obj_PWM.start(0) # starts the PWM output with a duty cycle of %0 duty cycle, Thi
 gui = Tk()
 topFrame = Frame(gui)
 topFrame.pack
-gui.geometry('575x1010+400+200')
+gui.geometry('575x1037+400+200')
 gui.title('test app')
 gui.configure(background='#626567')
 gui.resizable(False, False)  # disables resizing both ways
 
 
 # start code - console open and close doors boarder frames and weather event control boarder frames
-canvas = Canvas(gui, width=575, height=990, bg="#626567", highlightthickness=0)
+canvas = Canvas(gui, width=575, height=1017, bg="#626567", highlightthickness=0)
 rect1 = canvas.create_rectangle(31, 40, 262, 125, outline="lightgreen", width=3, fill="")
 rect2 = canvas.create_rectangle(275, 40, 507,125, outline="lightgreen", width=3, fill="")
 
-rect3 = canvas.create_rectangle (66, 450, 457, 535, outline="lightgreen", width=3, fill="")
+rect3 = canvas.create_rectangle (20, 450, 280, 600, outline="lightgreen", width=3, fill="")
+rect_deadman = canvas.create_rectangle (295, 450, 555, 600, outline="lightgreen", width=3, fill="")
 
-rect4 = canvas.create_rectangle(20, 670, 555, 960, outline="lightgreen", width=3, fill="")
+canvas.create_text(30, 458, anchor='nw', fill='lightgreen', font=('TkDefaultFont', 10, 'bold'),
+                    text='WEATHER EVENT DETECTION')
+canvas.create_text(305, 458, anchor='nw', fill='lightgreen', font=('TkDefaultFont', 10, 'bold'),
+                    text='OBSERVATION MONITORING')
+canvas.create_text(305, 478, anchor='nw', fill='white', font=('TkDefaultFont', 7), width=245,
+                    text="Auto-closes doors after long inactivity while open -- you'll get "
+                         "a warning first, with a chance to reset the timer.")
+
+rect4 = canvas.create_rectangle(20, 680, 555, 992, outline="lightgreen", width=3, fill="")
+canvas.create_text(30, 688, anchor='nw', fill='lightgreen', font=('TkDefaultFont', 10, 'bold'),
+                    text='DOME AZIMUTH DRIVER (REMOTE PI)')
 
 canvas.pack()
 # end code - console open and close doors boarder frames and weather event control boarder frames
@@ -1651,28 +1675,27 @@ button_clear_door_fault.place(x=300, y=135)
 
 button_exit = Button(text ='Exit', width = '12', height ='3', command=click_button_exit)
 button_exit.configure(bg = "gray85")
-button_exit.place(x=354,y=605)
+button_exit.place(x=354,y=610)
 
 
-button_emergency_stop = Button(text ='Emergency Stop', width = '23', height ='3',command=click_button_emergency_stop)
+button_emergency_stop = Button(text ='Shutter Doors\nEmergency Stop', width = '23', height ='3',command=click_button_emergency_stop)
 button_emergency_stop.configure(bg = "coral")
-button_emergency_stop.place(x=40,y=605)
+button_emergency_stop.place(x=40,y=610)
 
 button_view_log = Button(text ='View Last\nSession Log', width = '13', height ='3', command=click_button_view_log)
 button_view_log.configure(bg = "gray85")
-button_view_log.place(x=225, y=605)
+button_view_log.place(x=225, y=610)
 
-button_toggle_auto_close = Button(text ='TOGGLE \n Weather Event \n Auto Doors Close', width = '12', height ='4',command=click_button_toggle_auto_close)
-button_toggle_auto_close.configure(bg = "gray85")
-button_toggle_auto_close.place(x=74,y=458)
+switch_auto_close = ToggleSwitch(gui, x=30, y=480, on_click=click_switch_auto_close,
+                                  off_text='Disabled', on_text='Enabled')
 
-button_toggle_deadman_switch = Button(text='TOGGLE\nDead-Man\'s Switch', width='15', height='2', command=click_button_toggle_deadman_switch)
-button_toggle_deadman_switch.configure(bg='gray85')
-button_toggle_deadman_switch.place(x=40, y=545)
+switch_deadman = ToggleSwitch(gui, x=305, y=515, on_click=click_switch_deadman,
+                               off_text='Disabled', on_text='Enabled')
+switch_deadman.set_state(deadman_enabled) # defaults to ON
 
 deadman_switch_led = Button(text='Dead-Man\'s Switch:\nENABLED', width='18', height='2')
 deadman_switch_led.configure(bg='lawn green')
-deadman_switch_led.place(x=280, y=545)
+deadman_switch_led.place(x=305, y=549)
 
 
 # --- Dome (ASCOM Alpaca) driver buttons/switches -----------------------
@@ -1682,29 +1705,29 @@ deadman_switch_led.place(x=280, y=545)
 
 label_dome_connect = Button(text='Dome Driver Connection', width='22', height='1',
                              relief='flat', bg='#626567', fg='white')
-label_dome_connect.place(x=40, y=678)
-switch_dome_connect = ToggleSwitch(gui, x=40, y=702, on_click=click_switch_dome_connect,
+label_dome_connect.place(x=40, y=710)
+switch_dome_connect = ToggleSwitch(gui, x=40, y=734, on_click=click_switch_dome_connect,
                                     off_text='Disconnected', on_text='Connected')
 
 label_dome_cover = Button(text='Mirror Cover', width='14', height='1',
                            relief='flat', bg='#626567', fg='white')
-label_dome_cover.place(x=40, y=742)
-switch_dome_cover = ToggleSwitch(gui, x=40, y=766, on_click=click_switch_dome_cover,
+label_dome_cover.place(x=40, y=774)
+switch_dome_cover = ToggleSwitch(gui, x=40, y=798, on_click=click_switch_dome_cover,
                                   off_text='Closed', on_text='Open')
 
 label_dome_track = Button(text='Telescope Tracking', width='18', height='1',
                            relief='flat', bg='#626567', fg='white')
-label_dome_track.place(x=40, y=806)
-switch_dome_track = ToggleSwitch(gui, x=40, y=830, on_click=click_switch_dome_track,
+label_dome_track.place(x=40, y=838)
+switch_dome_track = ToggleSwitch(gui, x=40, y=862, on_click=click_switch_dome_track,
                                   off_text='Off', on_text='On')
 
 button_dome_find_home = Button(text ='Find Dome\nHome', width = '10', height ='3', command=click_button_dome_find_home)
 button_dome_find_home.configure(bg = "white")
-button_dome_find_home.place(x=40, y=870)
+button_dome_find_home.place(x=40, y=902)
 
-button_dome_stop = Button(text ='Stop Dome\nRotation', width = '11', height ='3', command=click_button_dome_stop)
+button_dome_stop = Button(text ='Dome Azimuth\nEmergency Stop', width = '11', height ='3', command=click_button_dome_stop)
 button_dome_stop.configure(bg = "coral")
-button_dome_stop.place(x=390, y=870)
+button_dome_stop.place(x=390, y=902)
 
 # --- end dome (ASCOM Alpaca) driver buttons/switches -------------------
 
@@ -1732,22 +1755,22 @@ door_opened_led.place (x=380, y=88)
 door_closed_led = Button(text = "Doors Are Closed", width = '11', height = '1')
 door_closed_led.place (x=138, y=88)
 
-auto_close_doors_enabled_disabled_led = Button(text = "Auto Doors Close \n DISABLED", width = '12', height = '4')
-auto_close_doors_enabled_disabled_led.place (x=208, y=458)
+auto_close_doors_enabled_disabled_led = Button(text = "Auto Doors Close \n DISABLED", width = '11', height = '2')
+auto_close_doors_enabled_disabled_led.place (x=30, y=518)
 
-weather_event_indicator_led = Button(text = "No Weather \n Event Detected", width = '10', height = '4')
-weather_event_indicator_led.place (x=341, y=458)
+weather_event_indicator_led = Button(text = "No Weather \n Event Detected", width = '11', height = '2')
+weather_event_indicator_led.place (x=145, y=518)
 weather_event_indicator_led.configure(bg = "gray85")
 
 
 # --- Dome (ASCOM Alpaca) driver LEDs/readouts ---------------------------
 
 dome_at_home_led = Button(text = "Dome Home:\nNo", width = '14', height = '3')
-dome_at_home_led.place(x=260, y=870)
+dome_at_home_led.place(x=260, y=902)
 dome_at_home_led.configure(bg = "gray85")
 
 dome_azimuth_display = Button(text = "Azimuth:\n--.- deg", width = '14', height = '3')
-dome_azimuth_display.place(x=310, y=678)
+dome_azimuth_display.place(x=310, y=710)
 dome_azimuth_display.configure(bg = "gray85")
 
 # --- end dome (ASCOM Alpaca) driver LEDs/readouts ------------------------
