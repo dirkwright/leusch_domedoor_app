@@ -429,6 +429,7 @@ def _dome_refresh_status():
     def _done(result, error):
         global dome_connected, dome_shutter_status, dome_slewing
         global dome_at_home, dome_at_park, dome_slaved, dome_last_error_logged
+        global _dome_last_slew_completed_time
         if error is not None:
             if not dome_last_error_logged:
                 listbox.insert(END, ' Dome status poll failed: ' + str(error))
@@ -459,6 +460,12 @@ def _dome_refresh_status():
         ):
             if old != new:
                 log_event('dome', 'state_changed', field=field, old_value=old, new_value=new)
+        if dome_slewing and not new_slewing:
+            # a slew just completed -- proof the dome actually moved, which is
+            # exactly what the stall watchdog is waiting to see
+            _dome_last_slew_completed_time = time.monotonic()
+            if _dome_stall_warning_active:
+                _dome_stall_clear(reason='slew_completed')
         dome_connected = new_connected
         dome_shutter_status = new_shutter_status
         dome_slewing = new_slewing
@@ -502,6 +509,109 @@ def poll_dome_azimuth():
     if exit_flag == True:
         return
     gui.after(DOME_AZIMUTH_POLL_MS, poll_dome_azimuth)
+
+
+# --- dome-tracking-stall watchdog -------------------------------------------
+# Advisory only -- there is no safe automatic action to take here (unlike the
+# dead-man's-switch, which can safely auto-close the doors), so this only
+# ever tells the operator something looks wrong and lets them decide what to
+# do. Deliberately non-modal, same reasoning as the dead-man's-switch alert.
+
+def _dome_stall_force_foreground():
+    gui.deiconify()
+    gui.lift()
+    gui.attributes('-topmost', True)
+    gui.focus_force()
+    gui.bell()
+
+
+def _dome_stall_clear(reason):
+    global _dome_stall_warning_active, _dome_stall_alert_window
+    if not _dome_stall_warning_active:
+        return
+    log_event('dome', 'tracking_stall_recovered', reason=reason)
+    listbox.insert(END, ' Dome tracking-stall warning cleared (' + reason + ').')
+    _dome_stall_warning_active = False
+    if _dome_stall_alert_window is not None:
+        try:
+            _dome_stall_alert_window.destroy()
+        except Exception:
+            pass
+        _dome_stall_alert_window = None
+    gui.attributes('-topmost', False)
+
+
+def _raise_dome_stall_warning(idle_s):
+    global _dome_stall_warning_active, _dome_stall_alert_window
+
+    _dome_stall_warning_active = True
+    log_event('dome', 'tracking_stall_warning_issued', idle_s=round(idle_s, 1),
+              threshold_s=DOME_TRACKING_STALL_WARNING_SECONDS)
+    listbox.insert(END, ' =========== DOME NOT FOLLOWING TELESCOPE ===========')
+    listbox.insert(END, ' Track Telescope is enabled but the dome has not completed a')
+    listbox.insert(END, ' slew in over ' + str(DOME_TRACKING_STALL_WARNING_SECONDS // 60) + ' minutes.')
+    listbox.insert(END, ' On 2026-09-21 this was caused by SiTech\'s own telescope-status')
+    listbox.insert(END, ' service hanging -- the dome driver and dome hardware were fine,')
+    listbox.insert(END, ' Track Telescope just had nothing to follow.')
+
+    _dome_stall_force_foreground()
+
+    win = Toplevel(gui)
+    win.title('Dome Not Following Telescope')
+    win.geometry('480x260+420+250')
+    win.configure(bg='#7a1f1f')
+    win.attributes('-topmost', True)
+    _dome_stall_alert_window = win
+
+    Label(win, text='DOME NOT FOLLOWING TELESCOPE', bg='#7a1f1f', fg='white',
+          font=('TkDefaultFont', 14, 'bold')).pack(pady=(15, 5))
+    Label(win, bg='#7a1f1f', fg='white', justify='left', wraplength=440, text=
+          'Track Telescope has been enabled for over ' +
+          str(DOME_TRACKING_STALL_WARNING_SECONDS // 60) + ' minutes, but the dome has not '
+          'completed a slew in that time.\n\n'
+          'This has happened before due to SiTech\'s own telescope-status service '
+          'becoming unresponsive -- the dome driver and dome itself were fine. '
+          'Restarting SiTech resolved it last time, though it took more than one '
+          'restart to fully clear -- watch for the dome to actually move afterward. '
+          'You can independently confirm the dome hardware is fine with Find Home.\n\n'
+          'This will clear on its own once the dome completes a slew again.'
+          ).pack(padx=20, pady=5)
+    Button(win, text='OK', width=15, height=2, command=lambda: _dome_stall_clear('acknowledged'),
+           bg='white').pack(pady=10)
+
+    win.protocol("WM_DELETE_WINDOW", lambda: _dome_stall_clear('acknowledged'))
+
+
+def dome_tracking_stall_check():
+    global _dome_last_slew_completed_time, _dome_stall_last_heartbeat_time
+
+    if not dome_slaved:
+        _dome_last_slew_completed_time = None
+        _dome_stall_last_heartbeat_time = None
+        if _dome_stall_warning_active:
+            _dome_stall_clear(reason='tracking_disabled')
+    else:
+        if _dome_last_slew_completed_time is None:
+            # tracking just became armed (or the app just started with it
+            # already on) -- start the clock now rather than warning
+            # immediately off a stale/nonexistent baseline
+            _dome_last_slew_completed_time = time.monotonic()
+        idle = time.monotonic() - _dome_last_slew_completed_time
+
+        if _dome_stall_last_heartbeat_time is None or \
+           time.monotonic() - _dome_stall_last_heartbeat_time > DOME_TRACKING_STALL_HEARTBEAT_INTERVAL_MS / 1000:
+            log_event('dome', 'tracking_stall_heartbeat', level='DEBUG',
+                      idle_s=round(idle, 1), warning_active=_dome_stall_warning_active)
+            _dome_stall_last_heartbeat_time = time.monotonic()
+
+        if not _dome_stall_warning_active and idle > DOME_TRACKING_STALL_WARNING_SECONDS:
+            _raise_dome_stall_warning(idle)
+
+    if exit_flag == True:
+        return
+    gui.after(DOME_TRACKING_STALL_CHECK_INTERVAL_MS, dome_tracking_stall_check)
+
+# --- end dome-tracking-stall watchdog ---------------------------------------
 
 # --- end dome (ASCOM Alpaca) driver controls -------------------------------
 
@@ -1491,6 +1601,31 @@ dome_last_error_logged = False # avoids spamming the session log every poll duri
 
 DOME_AZIMUTH_POLL_MS = 200 # ~5 times/second, separate from the slower 5s status poll
 
+# dome-tracking-stall watchdog -- the dome driver's own "Track Telescope"
+# (Slaved) can stay reported True while silently doing nothing: on
+# 2026-09-21 SiTech's telescope-status service (polled internally by the
+# dome driver, entirely outside this app's or the dome driver's control)
+# hung for extended periods, so Slaved stayed True and the dome simply
+# never slewed again until SiTech was restarted -- see that night's
+# session log/incident writeup. This app can't fix or even see into
+# SiTech, but it CAN notice "Slaved is True and no slew has completed in
+# a long time" from data it already polls, and tell the operator so they
+# can go check/restart SiTech themselves, rather than the loss of
+# tracking going unnoticed for tens of minutes.
+DOME_TRACKING_STALL_WARNING_SECONDS = 10 * 60 # normal tracking re-slews roughly every 45-90s;
+                                                # 10 min is a generous margin above that, well
+                                                # under the 34-54 min it actually took to notice
+                                                # on 2026-09-21
+DOME_TRACKING_STALL_CHECK_INTERVAL_MS = 30 * 1000
+DOME_TRACKING_STALL_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000 # quiet DEBUG-level proof-of-life, same
+                                                            # reasoning as the deadman's-switch one
+_dome_last_slew_completed_time = None # time.monotonic() of the last observed slewing True->False;
+                                       # None means "not currently armed" (Slaved is False, or
+                                       # Slaved just became True and no baseline exists yet)
+_dome_stall_warning_active = False
+_dome_stall_alert_window = None
+_dome_stall_last_heartbeat_time = None
+
 
 SHUTTER_STATE_LABELS = {0: 'Open', 1: 'Closed', 2: 'Opening', 3: 'Closing', 4: 'Error'}
 
@@ -1813,6 +1948,7 @@ gui.after(50, task2)
 gui.after(150, task3)
 gui.after(DOME_STATUS_POLL_MS, poll_dome_status)
 gui.after(DOME_AZIMUTH_POLL_MS, poll_dome_azimuth)
+gui.after(DOME_TRACKING_STALL_CHECK_INTERVAL_MS, dome_tracking_stall_check)
 gui.after(DEADMAN_CHECK_INTERVAL_MS, deadman_check)
 gui.protocol("WM_DELETE_WINDOW", click_button_exit) # route the OS close (X) button through the same safe-shutdown path as the Exit button, not straight to exit_now
 gui.mainloop()
