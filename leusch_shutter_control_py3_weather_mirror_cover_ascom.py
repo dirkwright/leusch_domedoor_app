@@ -526,6 +526,9 @@ def _dome_stall_force_foreground():
 
 
 def _dome_stall_clear(reason):
+    # a real resolution -- the stall condition itself is gone (not just the
+    # popup dismissed). Clears everything, including suppressing any further
+    # re-notify until a fresh stall is independently detected again.
     global _dome_stall_warning_active, _dome_stall_alert_window
     if not _dome_stall_warning_active:
         return
@@ -541,18 +544,35 @@ def _dome_stall_clear(reason):
     gui.attributes('-topmost', False)
 
 
-def _raise_dome_stall_warning(idle_s):
-    global _dome_stall_warning_active, _dome_stall_alert_window
+def _dome_stall_acknowledge():
+    # operator has seen it -- just hide the popup. Deliberately does NOT
+    # clear _dome_stall_warning_active: the underlying stall is very likely
+    # still happening (SiTech doesn't fix itself just because someone clicked
+    # OK), so dome_tracking_stall_check() will bring the popup back after
+    # DOME_TRACKING_STALL_RENOTIFY_SECONDS if it's still stalled then --
+    # instead of the popup reappearing within the next ~30s check tick like
+    # it did before this fix (confirmed in the field 2026-09-28 through
+    # 2026-10-08: operators had to dismiss the same warning repeatedly,
+    # sometimes more than a dozen times in one session).
+    global _dome_stall_alert_window
+    idle_s = None
+    if _dome_last_slew_completed_time is not None:
+        idle_s = round(time.monotonic() - _dome_last_slew_completed_time, 1)
+    log_event('dome', 'tracking_stall_acknowledged', idle_s=idle_s)
+    listbox.insert(END, ' Dome tracking-stall warning acknowledged (still unresolved -- '
+                        'will remind again in ' + str(DOME_TRACKING_STALL_RENOTIFY_SECONDS // 60) +
+                        ' min if the dome still hasn\'t moved).')
+    if _dome_stall_alert_window is not None:
+        try:
+            _dome_stall_alert_window.destroy()
+        except Exception:
+            pass
+        _dome_stall_alert_window = None
+    gui.attributes('-topmost', False)
 
-    _dome_stall_warning_active = True
-    log_event('dome', 'tracking_stall_warning_issued', idle_s=round(idle_s, 1),
-              threshold_s=DOME_TRACKING_STALL_WARNING_SECONDS)
-    listbox.insert(END, ' =========== DOME NOT FOLLOWING TELESCOPE ===========')
-    listbox.insert(END, ' Track Telescope is enabled but the dome has not completed a')
-    listbox.insert(END, ' slew in over ' + str(DOME_TRACKING_STALL_WARNING_SECONDS // 60) + ' minutes.')
-    listbox.insert(END, ' On 2026-09-21 this was caused by SiTech\'s own telescope-status')
-    listbox.insert(END, ' service hanging -- the dome driver and dome hardware were fine,')
-    listbox.insert(END, ' Track Telescope just had nothing to follow.')
+
+def _show_dome_stall_popup():
+    global _dome_stall_alert_window, _dome_stall_last_notify_time
 
     _dome_stall_force_foreground()
 
@@ -562,6 +582,7 @@ def _raise_dome_stall_warning(idle_s):
     win.configure(bg='#7a1f1f')
     win.attributes('-topmost', True)
     _dome_stall_alert_window = win
+    _dome_stall_last_notify_time = time.monotonic()
 
     Label(win, text='DOME NOT FOLLOWING TELESCOPE', bg='#7a1f1f', fg='white',
           font=('TkDefaultFont', 14, 'bold')).pack(pady=(15, 5))
@@ -576,10 +597,32 @@ def _raise_dome_stall_warning(idle_s):
           'You can independently confirm the dome hardware is fine with Find Home.\n\n'
           'This will clear on its own once the dome completes a slew again.'
           ).pack(padx=20, pady=5)
-    Button(win, text='OK', width=15, height=2, command=lambda: _dome_stall_clear('acknowledged'),
+    Button(win, text='OK', width=15, height=2, command=_dome_stall_acknowledge,
            bg='white').pack(pady=10)
 
-    win.protocol("WM_DELETE_WINDOW", lambda: _dome_stall_clear('acknowledged'))
+    win.protocol("WM_DELETE_WINDOW", _dome_stall_acknowledge)
+
+
+def _raise_dome_stall_warning(idle_s):
+    global _dome_stall_warning_active
+
+    _dome_stall_warning_active = True
+    log_event('dome', 'tracking_stall_warning_issued', idle_s=round(idle_s, 1),
+              threshold_s=DOME_TRACKING_STALL_WARNING_SECONDS)
+    listbox.insert(END, ' =========== DOME NOT FOLLOWING TELESCOPE ===========')
+    listbox.insert(END, ' Track Telescope is enabled but the dome has not completed a')
+    listbox.insert(END, ' slew in over ' + str(DOME_TRACKING_STALL_WARNING_SECONDS // 60) + ' minutes.')
+    listbox.insert(END, ' On 2026-09-21 this was caused by SiTech\'s own telescope-status')
+    listbox.insert(END, ' service hanging -- the dome driver and dome hardware were fine,')
+    listbox.insert(END, ' Track Telescope just had nothing to follow.')
+    _show_dome_stall_popup()
+
+
+def _renotify_dome_stall_warning(idle_s):
+    log_event('dome', 'tracking_stall_renotified', idle_s=round(idle_s, 1))
+    listbox.insert(END, ' Dome still not following telescope (idle ' +
+                        str(round(idle_s / 60, 1)) + ' min) -- re-showing warning.')
+    _show_dome_stall_popup()
 
 
 def dome_tracking_stall_check():
@@ -606,6 +649,12 @@ def dome_tracking_stall_check():
 
         if not _dome_stall_warning_active and idle > DOME_TRACKING_STALL_WARNING_SECONDS:
             _raise_dome_stall_warning(idle)
+        elif _dome_stall_warning_active and _dome_stall_alert_window is None and \
+                time.monotonic() - _dome_stall_last_notify_time > DOME_TRACKING_STALL_RENOTIFY_SECONDS:
+            # still stalled, operator already acknowledged and dismissed it --
+            # remind them again rather than nagging every ~30s or going
+            # silent forever
+            _renotify_dome_stall_warning(idle)
 
     if exit_flag == True:
         return
@@ -1619,12 +1668,22 @@ DOME_TRACKING_STALL_WARNING_SECONDS = 10 * 60 # normal tracking re-slews roughly
 DOME_TRACKING_STALL_CHECK_INTERVAL_MS = 30 * 1000
 DOME_TRACKING_STALL_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000 # quiet DEBUG-level proof-of-life, same
                                                             # reasoning as the deadman's-switch one
+DOME_TRACKING_STALL_RENOTIFY_SECONDS = 15 * 60 # if acknowledged but still stalled, wait this long
+                                                 # before showing the popup again -- added after the
+                                                 # field showed acknowledging did nothing to the
+                                                 # underlying SiTech-side stall, so the old code (no
+                                                 # re-notify delay at all) re-popped the same warning
+                                                 # within the next ~30s check tick, over and over
+                                                 # (observed 2026-09-28 through 2026-10-08)
 _dome_last_slew_completed_time = None # time.monotonic() of the last observed slewing True->False;
                                        # None means "not currently armed" (Slaved is False, or
                                        # Slaved just became True and no baseline exists yet)
-_dome_stall_warning_active = False
-_dome_stall_alert_window = None
+_dome_stall_warning_active = False # True from first detection until the stall actually resolves
+                                    # (a real slew, or tracking disabled) -- NOT cleared by
+                                    # acknowledging the popup, see _dome_stall_acknowledge()
+_dome_stall_alert_window = None # the Toplevel while showing, or None while hidden/acknowledged
 _dome_stall_last_heartbeat_time = None
+_dome_stall_last_notify_time = None # time.monotonic() of the last time the popup was (re)shown
 
 
 SHUTTER_STATE_LABELS = {0: 'Open', 1: 'Closed', 2: 'Opening', 3: 'Closing', 4: 'Error'}
