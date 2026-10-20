@@ -526,6 +526,16 @@ def poll_dome_status():
     gui.after(DOME_STATUS_POLL_MS, poll_dome_status)
 
 
+def _wrapped_azimuth_delta(a, b):
+    """Signed shortest-path a-b in degrees, accounting for the 0/360 wrap."""
+    delta = a - b
+    if delta >= 180.0:
+        delta -= 360.0
+    elif delta < -180.0:
+        delta += 360.0
+    return delta
+
+
 def poll_dome_azimuth():
     # azimuth samples themselves are already captured via _dome_alpaca_get's
     # own instrumentation (logged at DEBUG level) -- nothing extra to log here
@@ -534,8 +544,39 @@ def poll_dome_azimuth():
             return _dome_alpaca_get('azimuth')
 
         def _done(result, error):
-            global dome_azimuth
+            global dome_azimuth, _dome_az_pending_value, _dome_az_pending_count
             if error is None:
+                if dome_azimuth is not None:
+                    jump = _wrapped_azimuth_delta(result, dome_azimuth)
+                    if abs(jump) > DOME_AZIMUTH_GLITCH_MAX_DELTA_DEG:
+                        # oversized -- could be a one-poll glitch or a real
+                        # jump (e.g. FindHome's hard encoder-count reset).
+                        # Don't decide from a single sample either way: only
+                        # trust it once DOME_AZIMUTH_JUMP_CONFIRM_COUNT
+                        # consecutive polls agree with each other.
+                        if (_dome_az_pending_value is not None and abs(_wrapped_azimuth_delta(
+                                result, _dome_az_pending_value)) <= DOME_AZIMUTH_JUMP_CONFIRM_TOLERANCE_DEG):
+                            _dome_az_pending_count += 1
+                        else:
+                            _dome_az_pending_value = result
+                            _dome_az_pending_count = 1
+                        if _dome_az_pending_count >= DOME_AZIMUTH_JUMP_CONFIRM_COUNT:
+                            log_event('dome', 'azimuth_jump_confirmed', dome_az_prev=round(dome_azimuth, 3),
+                                      dome_az_new=round(result, 3), confirmations=_dome_az_pending_count)
+                            dome_azimuth = result
+                            dome_azimuth_display.configure(text='Dome Azimuth:\n%.1f deg' % dome_azimuth, bg='gray85')
+                            _dome_az_pending_value = None
+                            _dome_az_pending_count = 0
+                        else:
+                            log_event('dome', 'azimuth_glitch_rejected',
+                                      dome_az_prev=round(dome_azimuth, 3), dome_az_rejected=round(result, 3))
+                        return
+                    # normal-sized delta -- accept, and any oversized reading
+                    # being tracked above was a one-off glitch, not the start
+                    # of a real jump, since a real jump's next poll would
+                    # have agreed with it instead of coming back to normal.
+                    _dome_az_pending_value = None
+                    _dome_az_pending_count = 0
                 dome_azimuth = result
                 dome_azimuth_display.configure(text='Dome Azimuth:\n%.1f deg' % dome_azimuth, bg='gray85')
             else:
@@ -1956,6 +1997,11 @@ dome_slaved = False
 dome_azimuth = None # degrees, refreshed a few times/second by its own poll loop (see poll_dome_azimuth)
 dome_last_error_logged = False # avoids spamming the session log every poll during an outage
 
+# tracks an oversized azimuth reading awaiting confirmation before it's
+# trusted as a real jump rather than a glitch -- see poll_dome_azimuth()
+_dome_az_pending_value = None
+_dome_az_pending_count = 0
+
 # telescope-state globals -- mirrors the dome ones above, mutated only on
 # the Tk thread inside on_done callbacks
 telescope_connected = False
@@ -1996,6 +2042,45 @@ FOLLOWER_MIN_SLEW_SECONDS = 8.0
 FOLLOWER_MIN_DELTA_DEG = 3.5
 
 DOME_AZIMUTH_POLL_MS = 200 # ~5 times/second, separate from the slower 5s status poll
+
+# 2026-10-14/15 overnight log forensics (confirmed server-side in the dome
+# driver's own alpyca.log, not just this app's client-side view) found the
+# dome's Azimuth GET occasionally returns one wildly wrong single-poll value
+# (e.g. a real 239.1 deg momentarily reading as -21.7 deg) before reverting
+# to the correct value on the very next 200ms poll -- a real, if rare
+# (roughly 1-in-a-few-hundred polls), encoder/driver-level glitch, not
+# something introduced by this app. The dome physically cannot move more
+# than a couple degrees in one 200ms poll, so any single-poll jump bigger
+# than this is a glitch to be rejected, not a real reading. Deliberately
+# only targets the large (~260 deg offset) version of the glitch, which is
+# the one big enough to fool follower_check()'s delta into firing a bogus
+# slew_issued -- the glitch's smaller (~2.4 deg) sibling already sits under
+# FOLLOWER_MIN_DELTA_DEG and never affects dome movement.
+DOME_AZIMUTH_GLITCH_MAX_DELTA_DEG = 20.0
+
+# 2026-10-15 field test exposed a gap in the single-sample check above: a
+# FindHome completion hard-resets the dome driver's encoder count the
+# instant the home switch trips (confirmed in domedevice.py's _find_home())
+# -- a real, permanent, oversized jump, not a glitch. The check above can't
+# tell the two apart from one sample alone, and rejecting every poll forever
+# (never re-baselining) left the GUI and the follower stuck on a stale
+# azimuth for the rest of that session. Oversized readings are now held as
+# "pending" and only trusted once this many *consecutive* polls agree with
+# each other (a transient glitch never survives to the next 200ms poll; a
+# real jump like FindHome's does) -- see poll_dome_azimuth(). 3 rather than
+# 2 so that two independent glitches landing back-to-back can't coincidentally
+# confirm each other; the extra ~200ms of latency this adds before trusting
+# a real jump has no safety impact, since SlewToAzimuth's target always comes
+# from telescope_az, never from this dome_azimuth reading.
+DOME_AZIMUTH_JUMP_CONFIRM_COUNT = 3
+
+# how close two oversized readings must be to count as "the same" reading
+# for the confirmation above -- wide enough to tolerate real dome motion
+# between polls (observed up to ~3.4 deg/sec, so well under 2 deg across a
+# few 200ms polls), tight enough that two different glitch values (which
+# have ranged from ~2 to ~290 deg away from truth) essentially never land
+# within it of each other by chance.
+DOME_AZIMUTH_JUMP_CONFIRM_TOLERANCE_DEG = 2.0
 
 # dome-tracking-stall watchdog -- the dome driver's own "Track Telescope"
 # (Slaved) can stay reported True while silently doing nothing: on
